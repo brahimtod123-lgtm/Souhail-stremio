@@ -1,121 +1,154 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
-const fetch = require('node-fetch');
 
-// ⭐⭐⭐ Real-Debrid API Key من Environment ⭐⭐⭐
 const RD_API_KEY = process.env.RD_API_KEY || '';
 
-// مواقع التورنت للبحث
-const TORRENT_SITES = [
-    {
-        name: 'YTS',
-        search: (query) => `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(query)}&limit=10`
-    },
-    {
-        name: '1337x',
-        search: (query) => `https://1337x.to/search/${encodeURIComponent(query)}/1/`
-    }
-];
-
 const manifest = {
-    id: 'com.souhail.real',
-    version: '4.0.0',
-    name: '💎 SOUHAIL REAL',
-    description: 'أفلام حقيقية مع Real-Debrid - API مضبوط',
+    id: 'com.souhail.final',
+    version: '5.0.0',
+    name: '💎 SOUHAIL FINAL',
+    description: 'Real-Debrid streams working now',
     logo: 'https://img.icons8.com/color/96/000000/movie.png',
-    background: 'https://img.icons8.com/color/480/000000/cinema-.png',
     resources: ['stream'],
-    types: ['movie', 'series'],
-    idPrefixes: ['tt'],
+    types: ['movie'],
     catalogs: []
 };
 
 const builder = new addonBuilder(manifest);
 
-// ⭐⭐⭐ دالة البحث في التورنتات ⭐⭐⭐
-async function searchRealTorrents(query) {
-    console.log(`🔍 البحث عن: "${query}"`);
+// ⭐⭐⭐ دالة لاختبار Real-Debrid API Key ⭐⭐⭐
+async function testRDKey(apiKey) {
+    if (!apiKey || apiKey.length < 20) return false;
     
-    const results = [];
-    
-    // جرب YTS API أولاً (الأسهل)
     try {
-        const ytsUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(query)}&limit=5`;
-        console.log(`🌐 YTS API: ${ytsUrl}`);
-        
-        const response = await fetch(ytsUrl, {
+        const response = await fetch('https://api.real-debrid.com/rest/1.0/user', {
             headers: {
-                'User-Agent': 'Mozilla/5.0',
-                'Accept': 'application/json'
-            },
-            timeout: 10000
+                'Authorization': `Bearer ${apiKey}`
+            }
         });
         
         if (response.ok) {
             const data = await response.json();
-            if (data.data && data.data.movies) {
-                data.data.movies.forEach(movie => {
-                    movie.torrents.forEach(torrent => {
+            console.log(`✅ Real-Debrid valid! User: ${data.username}, Premium: ${data.premium}`);
+            return true;
+        }
+        console.log(`❌ RD Key invalid: ${response.status}`);
+        return false;
+    } catch (error) {
+        console.log(`❌ RD Key test failed: ${error.message}`);
+        return false;
+    }
+}
+
+// ⭐⭐⭐ دالة للبحث في مصادر تعمل على Railway ⭐⭐⭐
+async function searchWorkingSources(query) {
+    console.log(`🔍 Searching: "${query}"`);
+    
+    const results = [];
+    
+    // 1. استخدم PirateBay API (يعمل على Railway)
+    try {
+        console.log('🌐 Trying PirateBay API...');
+        const pbUrl = `https://apibay.org/q.php?q=${encodeURIComponent(query)}&cat=200`;
+        const response = await fetch(pbUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 5000
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+                data.forEach(item => {
+                    if (item.name && item.seeders > 5) {
                         results.push({
-                            title: `${movie.title} (${movie.year}) ${torrent.quality}`,
-                            size: formatSize(torrent.size_bytes),
-                            sizeBytes: torrent.size_bytes,
-                            seeders: torrent.seeds,
-                            quality: torrent.quality,
-                            language: 'English',
-                            source: 'YTS',
-                            magnet: generateMagnet(movie.title, torrent.hash),
-                            year: movie.year,
-                            imdbId: movie.imdb_code
+                            title: item.name,
+                            size: formatBytes(item.size),
+                            seeders: parseInt(item.seeders),
+                            quality: detectQuality(item.name),
+                            language: detectLanguage(item.name),
+                            source: 'PirateBay',
+                            magnet: `magnet:?xt=urn:btih:${item.info_hash}&dn=${encodeURIComponent(item.name)}`,
+                            type: 'movie'
                         });
-                    });
+                    }
                 });
-                console.log(`✅ YTS: ${results.length} تورنت`);
+                console.log(`✅ PirateBay: ${data.length} results`);
             }
         }
     } catch (error) {
-        console.log(`❌ YTS failed: ${error.message}`);
+        console.log(`❌ PirateBay failed: ${error.message}`);
     }
     
-    // إذا ماجابتش نتائج، نضيف نتائج وهمية للاختبار
+    // 2. استخدم SolidTorrents API
+    try {
+        console.log('🌐 Trying SolidTorrents API...');
+        const stUrl = `https://solidtorrents.net/api/v1/search?q=${encodeURIComponent(query)}&category=video`;
+        const response = await fetch(stUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            timeout: 5000
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.results) {
+                data.results.forEach(item => {
+                    if (item.title && item.seeders > 2) {
+                        results.push({
+                            title: item.title,
+                            size: formatBytes(item.size),
+                            seeders: item.seeders,
+                            quality: detectQuality(item.title),
+                            language: detectLanguage(item.title),
+                            source: 'SolidTorrents',
+                            magnet: item.magnet,
+                            type: 'movie'
+                        });
+                    }
+                });
+                console.log(`✅ SolidTorrents: ${data.results.length} results`);
+            }
+        }
+    } catch (error) {
+        console.log(`❌ SolidTorrents failed: ${error.message}`);
+    }
+    
+    // 3. إذا مافي نتائج، نضيف عينات
     if (results.length === 0) {
-        console.log('⚠️ No results from APIs, adding sample torrents');
+        console.log('⚠️ Using sample torrents');
         results.push(
             {
-                title: `${query} (2024) 1080p WEB-DL`,
+                title: `${query} 1080p WEB-DL`,
                 size: '2.5 GB',
-                sizeBytes: 2500000000,
                 seeders: 150,
                 quality: '1080p',
                 language: 'English',
                 source: 'Sample',
-                magnet: generateMagnet(query, 'samplehash1080p'),
-                year: '2024'
-            },
-            {
-                title: `${query} (2024) 720p HD`,
-                size: '1.2 GB',
-                sizeBytes: 1200000000,
-                seeders: 85,
-                quality: '720p',
-                language: 'English',
-                source: 'Sample',
-                magnet: generateMagnet(`${query} 720p`, 'samplehash720p'),
-                year: '2024'
+                magnet: `magnet:?xt=urn:btih:SAMPLE1080PHASH&dn=${encodeURIComponent(query)}`,
+                type: 'movie'
             }
         );
     }
     
-    return results;
+    return results.slice(0, 5); // أول 5 فقط
 }
 
-// ⭐⭐⭐ دالة Real-Debrid ⭐⭐⭐
-async function checkRealDebrid(magnet, apiKey) {
-    if (!apiKey || apiKey.length < 20) return null;
+// ⭐⭐⭐ Real-Debrid مع معالجة الأخطاء ⭐⭐⭐
+async function resolveWithRD(magnet, apiKey) {
+    if (!apiKey) return null;
     
     try {
-        console.log(`🔗 تحقق من Real-Debrid: ${magnet.substring(0, 50)}...`);
+        console.log(`🔗 Checking RD cache...`);
         
-        // 1. Add magnet to Real-Debrid
+        // أولاً: تحقق من حالة API key
+        const userResponse = await fetch('https://api.real-debrid.com/rest/1.0/user', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        
+        if (!userResponse.ok) {
+            console.log(`❌ RD Key invalid (${userResponse.status})`);
+            return null;
+        }
+        
+        // ثانياً: أضف المغناطيس
         const addResponse = await fetch('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', {
             method: 'POST',
             headers: {
@@ -126,21 +159,19 @@ async function checkRealDebrid(magnet, apiKey) {
         });
         
         if (!addResponse.ok) {
-            console.log(`❌ RD Add failed: ${addResponse.status}`);
+            const error = await addResponse.text();
+            console.log(`❌ RD Add failed (${addResponse.status}):`, error.substring(0, 100));
             return null;
         }
         
         const addData = await addResponse.json();
         const torrentId = addData.id;
         
-        // 2. Wait a moment
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // ثالثاً: تحقق من المعلومات
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // 3. Get torrent info
         const infoResponse = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`
-            }
+            headers: { 'Authorization': `Bearer ${apiKey}` }
         });
         
         if (!infoResponse.ok) {
@@ -150,8 +181,10 @@ async function checkRealDebrid(magnet, apiKey) {
         
         const infoData = await infoResponse.json();
         
-        // 4. If cached, get download link
+        // رابعاً: إذا كان cached
         if (infoData.status === 'downloaded' && infoData.links && infoData.links.length > 0) {
+            console.log(`✅ Torrent cached on RD!`);
+            
             const unrestrictResponse = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
                 method: 'POST',
                 headers: {
@@ -164,24 +197,23 @@ async function checkRealDebrid(magnet, apiKey) {
             if (unrestrictResponse.ok) {
                 const unrestrictData = await unrestrictResponse.json();
                 
-                // Clean up
+                // نظف
                 await deleteFromRD(torrentId, apiKey);
                 
                 return {
                     streamUrl: unrestrictData.download,
-                    filename: infoData.filename,
-                    size: infoData.bytes,
-                    cached: true
+                    cached: true,
+                    size: infoData.bytes
                 };
             }
         }
         
-        // 5. Clean up if not cached
+        // نظف إذا ماشي cached
         await deleteFromRD(torrentId, apiKey);
-        return null;
+        return { cached: false };
         
     } catch (error) {
-        console.error(`❌ RD Error: ${error.message}`);
+        console.error(`❌ RD Error:`, error.message);
         return null;
     }
 }
@@ -190,27 +222,25 @@ async function deleteFromRD(torrentId, apiKey) {
     try {
         await fetch(`https://api.real-debrid.com/rest/1.0/torrents/delete/${torrentId}`, {
             method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`
-            }
+            headers: { 'Authorization': `Bearer ${apiKey}` }
         });
     } catch (error) {
-        // Ignore delete errors
+        // تجاهل أخطاء الحذف
     }
 }
 
-builder.defineStreamHandler(async ({ type, id }) => {
+builder.defineStreamHandler(async ({ id }) => {
     console.log('\n' + '='.repeat(60));
-    console.log('🎬 طلب من Stremio:', type, '-', id);
-    console.log('🔑 RD API:', RD_API_KEY ? '✅ موجود' : '❌ مفقود');
-    console.log('='.repeat(60));
+    console.log('🎬 Request:', id);
     
-    // ⭐⭐⭐ إذا مافي API Key ⭐⭐⭐
-    if (!RD_API_KEY || RD_API_KEY.length < 20) {
+    // ⭐⭐⭐ اختبار API key أولاً ⭐⭐⭐
+    const isKeyValid = await testRDKey(RD_API_KEY);
+    
+    if (!isKeyValid) {
         return {
             streams: [{
-                name: '⚙️ إعدادات مطلوبة',
-                title: `🔑 REAL-DEBRID API KEY مطلوب!\n\nفي Railway:\n1. Settings → Variables\n2. أضف: RD_API_KEY = مفتاحك\n3. المفتاح: ${RD_API_KEY || 'غير مضبوط'}\n\nاحصل على المفتاح من: real-debrid.com/apitoken`,
+                name: '❌ Invalid API Key',
+                title: `REAL-DEBRID API KEY INVALID!\n\nCurrent key: ${RD_API_KEY ? `${RD_API_KEY.substring(0, 15)}...` : 'Empty'}\n\nPlease check:\n1. Go to real-debrid.com/apitoken\n2. Copy your API key\n3. In Railway: Settings → Variables\n4. Set RD_API_KEY = your_key\n5. Restart the service`,
                 url: ''
             }]
         };
@@ -218,101 +248,91 @@ builder.defineStreamHandler(async ({ type, id }) => {
     
     try {
         // استخراج اسم الفيلم
-        let movieName = id;
-        let year = '';
-        
+        let movieName = 'Movie';
         if (id.includes(':')) {
             const parts = id.split(':');
             if (parts.length > 1) {
-                const nameWithYear = parts[1];
-                const yearMatch = nameWithYear.match(/\((\d{4})\)/);
-                if (yearMatch) {
-                    year = yearMatch[1];
-                    movieName = nameWithYear.replace(/\(\d{4}\)/, '').trim();
-                } else {
-                    movieName = nameWithYear.trim();
-                }
+                movieName = parts[1].replace(/\(\d{4}\)/, '').trim();
             }
         }
         
-        console.log(`🔍 جاري البحث: "${movieName}" ${year ? `(${year})` : ''}`);
-        
-        // ⭐⭐⭐ البحث عن التورنتات ⭐⭐⭐
-        const torrents = await searchRealTorrents(movieName);
+        // البحث عن تورنتات
+        const torrents = await searchWorkingSources(movieName || 'movie');
         
         if (torrents.length === 0) {
             return {
                 streams: [{
-                    name: '🔍 لا توجد نتائج',
-                    title: `لم يتم العثور على تورنتات لـ "${movieName}"\nجرب فيلم آخر`,
+                    name: '🔍 No Results',
+                    title: 'No torrents found. Try another movie.',
                     url: ''
                 }]
             };
         }
         
-        console.log(`✅ تم العثور على ${torrents.length} تورنت`);
-        
-        // ⭐⭐⭐ معالجة مع Real-Debrid ⭐⭐⭐
+        // معالجة مع Real-Debrid
         const streams = [];
         
-        for (const torrent of torrents.slice(0, 3)) { // فقط أول 3
-            console.log(`🔗 معالجة: ${torrent.title.substring(0, 40)}...`);
+        for (const torrent of torrents.slice(0, 3)) {
+            console.log(`Processing: ${torrent.title.substring(0, 40)}...`);
             
-            const rdResult = await checkRealDebrid(torrent.magnet, RD_API_KEY);
+            const rdResult = await resolveWithRD(torrent.magnet, RD_API_KEY);
             
             if (rdResult && rdResult.cached) {
-                // ⭐⭐⭐ تورنت موجود في Real-Debrid ⭐⭐⭐
+                // Real-Debrid cached
                 streams.push({
                     name: '💎 REAL-DEBRID',
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size}\n👤 ${torrent.seeders} سيدر\n✅ مخزن في Real-Debrid\n🔗 ${torrent.source}`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size}\n👤 ${torrent.seeders} seeds\n✅ CACHED ON REAL-DEBRID\n🔗 Direct stream ready`,
                     url: rdResult.streamUrl,
-                    behaviorHints: {
-                        notWebReady: false,
-                        bingeGroup: 'rd_cached'
-                    }
+                    behaviorHints: { notWebReady: false }
                 });
-                console.log(`✅ Cached on RD`);
             } else {
-                // ⭐⭐⭐ تورنت عادي (مش cached) ⭐⭐⭐
+                // Torrent فقط
                 streams.push({
                     name: '🧲 TORRENT',
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size}\n👤 ${torrent.seeders} سيدر\n⚠️ يحتاج Real-Debrid\n🔗 ${torrent.source}`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size}\n👤 ${torrent.seeders} seeds\n⚠️ Add to Real-Debrid to stream\n🔗 Source: ${torrent.source}`,
                     infoHash: extractInfoHash(torrent.magnet),
                     fileIdx: 0,
-                    behaviorHints: {
-                        notWebReady: true,
-                        bingeGroup: 'raw_torrent'
-                    }
+                    behaviorHints: { notWebReady: true }
                 });
-                console.log(`⚠️ Not cached on RD`);
             }
         }
         
-        console.log(`🚀 إرسال ${streams.length} ستريم إلى Stremio`);
+        console.log(`✅ Sending ${streams.length} streams`);
         return { streams };
         
     } catch (error) {
-        console.error('❌ خطأ:', error);
+        console.error('Error:', error);
         return {
             streams: [{
-                name: '❌ خطأ',
-                title: `خطأ: ${error.message}\nAPI Key: ${RD_API_KEY.substring(0, 10)}...\nالرجاء المحاولة مرة أخرى`,
+                name: '❌ Error',
+                title: `Error: ${error.message}\nRD Key: ${RD_API_KEY ? 'Present' : 'Missing'}`,
                 url: ''
             }]
         };
     }
 });
 
-// ⭐⭐⭐ دوال مساعدة ⭐⭐⭐
-function formatSize(bytes) {
+// دوال مساعدة
+function formatBytes(bytes) {
     if (!bytes) return 'Unknown';
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
 }
 
-function generateMagnet(title, hash) {
-    return `magnet:?xt=urn:btih:${hash}&dn=${encodeURIComponent(title)}&tr=udp://tracker.opentrackr.org:1337/announce`;
+function detectQuality(title) {
+    if (!title) return 'Unknown';
+    if (/2160p|4k|uhd/i.test(title)) return '4K';
+    if (/1080p|fhd/i.test(title)) return '1080p';
+    if (/720p|hd/i.test(title)) return '720p';
+    return 'SD';
+}
+
+function detectLanguage(title) {
+    if (!title) return 'English';
+    if (/arabic|عربي|arab/i.test(title)) return 'Arabic';
+    if (/french|فرنسي|fren/i.test(title)) return 'French';
+    return 'English';
 }
 
 function extractInfoHash(magnet) {
@@ -320,12 +340,12 @@ function extractInfoHash(magnet) {
     return match ? match[1].toLowerCase() : null;
 }
 
-// ⭐⭐⭐ تشغيل الخادم ⭐⭐⭐
+// تشغيل
 console.log('='.repeat(60));
-console.log('🚀 SOUHAIL REAL - جاهز مع Real-Debrid!');
-console.log('💎 RD API Key:', RD_API_KEY ? '✅ تم الإعداد' : '❌ مطلوب');
-console.log('📡 سيتم البحث في YTS و 1337x');
-console.log('🎬 أضف الإضافة في Stremio وابحث عن أي فيلم!');
+console.log('🚀 SOUHAIL FINAL - READY!');
+console.log('💎 RD API Key:', RD_API_KEY ? `✅ ${RD_API_KEY.substring(0, 10)}...` : '❌ Missing');
+console.log('🔗 Sources: PirateBay, SolidTorrents');
+console.log('🎬 Test: Search any movie in Stremio');
 console.log('='.repeat(60));
 
 serveHTTP(builder.getInterface(), { port: process.env.PORT || 3000 });
