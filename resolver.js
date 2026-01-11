@@ -1,42 +1,28 @@
-const { searchTorrentGalaxy } = require('./scraper');
-
-// ⭐⭐⭐ دالة Real-Debrid ⭐⭐⭐
+// دالة Real-Debrid
 async function getRealDebridStream(magnet, apiKey) {
     try {
         console.log(`🔗 معالجة مع Real-Debrid...`);
         
-        // 1. فحص الكاش السريع
-        const cachedUrl = await checkInstantCache(magnet, apiKey);
-        if (cachedUrl) {
-            console.log(`⚡ موجود في الكاش!`);
-            return {
-                streamUrl: cachedUrl,
-                cached: true,
-                instant: true
-            };
-        }
-        
-        // 2. إضافة المغناطيس
+        // 1. إضافة المغناطيس
         const addRes = await fetch('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: `magnet=${encodeURIComponent(magnet)}`,
-            signal: AbortSignal.timeout(15000)
+            body: `magnet=${encodeURIComponent(magnet)}`
         });
         
         if (!addRes.ok) {
-            console.log(`❌ فشل إضافة المغناطيس: ${addRes.status}`);
+            console.log(`❌ RD Add failed: ${addRes.status}`);
             return null;
         }
         
         const addData = await addRes.json();
         const torrentId = addData.id;
-        console.log(`📥 تمت الإضافة: ${torrentId}`);
+        console.log(`📥 Added to RD: ${torrentId}`);
         
-        // 3. اختيار جميع الملفات
+        // 2. اختيار الملفات
         await fetch(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, {
             method: 'POST',
             headers: {
@@ -46,26 +32,24 @@ async function getRealDebridStream(magnet, apiKey) {
             body: 'files=all'
         });
         
-        // 4. انتظر 3 ثواني
-        console.log(`⏳ انتظار المعالجة...`);
+        // 3. انتظار المعالجة
         await new Promise(resolve => setTimeout(resolve, 3000));
         
-        // 5. الحصول على معلومات التورنت
+        // 4. الحصول على المعلومات
         const infoRes = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(10000)
+            headers: { 'Authorization': `Bearer ${apiKey}` }
         });
         
         if (!infoRes.ok) {
-            await deleteRD(torrentId, apiKey);
+            await deleteFromRD(torrentId, apiKey);
             return null;
         }
         
         const infoData = await infoRes.json();
         
-        // 6. إذا كان جاهزاً، احصل على الرابط
+        // 5. إذا كان محملاً، احصل على الرابط
         if (infoData.status === 'downloaded' && infoData.links && infoData.links.length > 0) {
-            console.log(`✅ محمل على RD! جاري الحصول على الرابط...`);
+            console.log(`✅ Cached on RD! Getting link...`);
             
             const unrestrictRes = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
                 method: 'POST',
@@ -73,128 +57,72 @@ async function getRealDebridStream(magnet, apiKey) {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/x-www-form-urlencoded'
                 },
-                body: `link=${encodeURIComponent(infoData.links[0])}`,
-                signal: AbortSignal.timeout(10000)
+                body: `link=${encodeURIComponent(infoData.links[0])}`
             });
             
             if (unrestrictRes.ok) {
                 const unrestrictData = await unrestrictRes.json();
                 
                 // تنظيف
-                await deleteRD(torrentId, apiKey);
+                await deleteFromRD(torrentId, apiKey);
                 
                 return {
                     streamUrl: unrestrictData.download,
                     filename: infoData.filename,
                     size: infoData.bytes,
-                    cached: true,
-                    instant: false
+                    cached: true
                 };
             }
         }
         
-        // 7. تنظيف إذا لم يكن جاهزاً
-        await deleteRD(torrentId, apiKey);
-        console.log(`❌ غير موجود في الكاش`);
+        // 6. تنظيف
+        await deleteFromRD(torrentId, apiKey);
+        console.log(`❌ Not cached on RD`);
         return { cached: false };
         
     } catch (error) {
-        console.error(`🔥 خطأ RD: ${error.message}`);
+        console.error(`❌ RD Error: ${error.message}`);
         return null;
     }
 }
 
-// ⭐⭐⭐ فحص الكاش الفوري ⭐⭐⭐
-async function checkInstantCache(magnet, apiKey) {
-    try {
-        const addRes = await fetch('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: `magnet=${encodeURIComponent(magnet)}`,
-            signal: AbortSignal.timeout(8000)
-        });
-        
-        if (!addRes.ok) return null;
-        
-        const addData = await addRes.json();
-        const torrentId = addData.id;
-        
-        const infoRes = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(8000)
-        });
-        
-        if (infoRes.ok) {
-            const infoData = await infoRes.json();
-            
-            if (infoData.status === 'downloaded' && infoData.links?.length > 0) {
-                const unrestrictRes = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${apiKey}`,
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: `link=${encodeURIComponent(infoData.links[0])}`,
-                    signal: AbortSignal.timeout(8000)
-                });
-                
-                if (unrestrictRes.ok) {
-                    const unrestrictData = await unrestrictRes.json();
-                    await deleteRD(torrentId, apiKey);
-                    return unrestrictData.download;
-                }
-            }
-        }
-        
-        await deleteRD(torrentId, apiKey);
-        return null;
-        
-    } catch (error) {
-        return null;
-    }
-}
-
-// ⭐⭐⭐ حذف من RD ⭐⭐⭐
-async function deleteRD(torrentId, apiKey) {
+// حذف من RD
+async function deleteFromRD(torrentId, apiKey) {
     try {
         await fetch(`https://api.real-debrid.com/rest/1.0/torrents/delete/${torrentId}`, {
             method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-            signal: AbortSignal.timeout(5000)
+            headers: { 'Authorization': `Bearer ${apiKey}` }
         });
     } catch (error) {
         // تجاهل
     }
 }
 
-// ⭐⭐⭐ معالجة التورنتات ⭐⭐⭐
-async function processTorrents(torrents, apiKey, maxProcess = 12) {
+// معالجة التورنتات
+async function processTorrents(torrents, apiKey) {
     const streams = [];
     
-    // معالجة أول N تورنت
-    const toProcess = torrents.slice(0, maxProcess);
+    // معالجة أول 12 تورنت
+    const toProcess = torrents.slice(0, 12);
     
-    console.log(`🔄 معالجة ${toProcess.length} تورنت من أصل ${torrents.length}`);
+    console.log(`🔄 Processing ${toProcess.length} torrents...`);
     
     for (let i = 0; i < toProcess.length; i++) {
         const torrent = toProcess[i];
         
         try {
-            console.log(`📦 [${i+1}/${toProcess.length}] ${torrent.title.substring(0, 40)}...`);
+            console.log(`📦 [${i+1}/${toProcess.length}] ${torrent.quality} - ${torrent.title.substring(0, 50)}...`);
             
             const rdResult = await getRealDebridStream(torrent.magnet, apiKey);
             
             if (rdResult && rdResult.cached) {
-                // Real-Debrid cached
-                const qualityEmoji = torrent.quality.includes('4K') ? '🔥' : '💎';
-                const instantEmoji = rdResult.instant ? '⚡' : '✅';
+                // Real-Debrid cached stream
+                const qualityIcon = torrent.quality.includes('4K') ? '🔥' : 
+                                  torrent.quality.includes('1080p') ? '💎' : '🎬';
                 
                 streams.push({
-                    name: `${qualityEmoji} REAL-DEBRID`,
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeders\n${instantEmoji} DIRECT STREAM READY`,
+                    name: `${qualityIcon} ${torrent.quality}`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n✅ DIRECT STREAM READY`,
                     url: rdResult.streamUrl,
                     behaviorHints: {
                         notWebReady: false,
@@ -202,15 +130,16 @@ async function processTorrents(torrents, apiKey, maxProcess = 12) {
                     }
                 });
                 
-                console.log(`✅ تمت المعالجة: ${torrent.quality}`);
+                console.log(`✅ Cached: ${torrent.quality}`);
                 
             } else {
                 // Torrent فقط
-                const qualityEmoji = torrent.quality.includes('4K') ? '🎯' : '🧲';
+                const qualityIcon = torrent.quality.includes('4K') ? '🎯' : 
+                                  torrent.quality.includes('1080p') ? '📀' : '🧲';
                 
                 streams.push({
-                    name: `${qualityEmoji} TORRENT`,
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeders\n⚠️ أضف إلى Real-Debrid للبث`,
+                    name: `${qualityIcon} ${torrent.quality}`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n⚠️ Add to Real-Debrid to stream`,
                     infoHash: extractInfoHash(torrent.magnet),
                     fileIdx: 0,
                     behaviorHints: {
@@ -219,38 +148,32 @@ async function processTorrents(torrents, apiKey, maxProcess = 12) {
                     }
                 });
                 
-                console.log(`⚠️ تورنت فقط`);
+                console.log(`⚠️ Torrent only`);
+            }
+            
+            // انتظر بين المعالجات
+            if (i < toProcess.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
             
         } catch (error) {
-            console.log(`❌ فشل معالجة التورنت: ${error.message}`);
-        }
-        
-        // انتظر قليلاً بين المعالجات
-        if (i < toProcess.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            console.log(`❌ Failed: ${error.message}`);
         }
     }
     
     return streams;
 }
 
-// ⭐⭐⭐ استخراج الهايش ⭐⭐⭐
+// استخراج الـ infoHash
 function extractInfoHash(magnet) {
     const match = magnet.match(/btih:([a-fA-F0-9]{40})/);
-    if (match) return match[1].toLowerCase();
-    
-    // إنشاء هايش عشوائي
-    return Array.from({length: 40}, () => 
-        Math.floor(Math.random() * 16).toString(16)
-    ).join('');
+    return match ? match[1].toLowerCase() : 'testhash1234567890123456789012345678901234567890';
 }
 
-// ⭐⭐⭐ تصدير الدوال ⭐⭐⭐
+// تصدير الدوال
 module.exports = {
     getRealDebridStream,
     processTorrents,
-    checkInstantCache,
-    deleteRD,
+    deleteFromRD,
     extractInfoHash
 };
