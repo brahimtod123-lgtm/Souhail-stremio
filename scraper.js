@@ -22,7 +22,7 @@ async function searchTorrents(movieTitle, year = '') {
     }
 }
 
-// البحث في YTS (يعمل جيداً)
+// البحث في YTS
 async function searchYTS(query, year = '') {
     try {
         const searchQuery = year ? `${query} ${year}` : query;
@@ -37,20 +37,14 @@ async function searchYTS(query, year = '') {
         });
         
         if (!response.ok) {
-            console.log(`❌ YTS API response: ${response.status}`);
             return [];
         }
         
         const data = await response.json();
         const results = [];
         
-        console.log(`📊 YTS status: ${data.status}`);
-        console.log(`📊 YTS movies found: ${data.data?.movie_count || 0}`);
-        
         if (data.data?.movies) {
             data.data.movies.forEach(movie => {
-                console.log(`🎬 YTS found: ${movie.title_long}`);
-                
                 if (movie.torrents) {
                     movie.torrents.forEach(torrent => {
                         if (torrent.seeds > 5) {
@@ -70,7 +64,6 @@ async function searchYTS(query, year = '') {
             });
         }
         
-        console.log(`📥 YTS raw results: ${results.length}`);
         return results.slice(0, 15);
         
     } catch (error) {
@@ -79,14 +72,14 @@ async function searchYTS(query, year = '') {
     }
 }
 
-// توليد نتائج واقعية إذا APIs ماشيحات
+// توليد نتائج واقعية
 function generateRealisticResults(movieTitle, year = '') {
     console.log(`🎬 توليد نتائج واقعية لـ: "${movieTitle}"`);
     
     const results = [];
     const movieYear = year || '2024';
     
-    // قائمة واقعية للجودات والأحجام
+    // قائمة واقعية للجودات
     const qualityOptions = [
         { name: '2160p 4K UHD', sizes: ['15.2 GB', '18.7 GB', '22.3 GB'], seeders: 150 },
         { name: '1080p BluRay', sizes: ['8.5 GB', '10.2 GB', '12.7 GB'], seeders: 180 },
@@ -115,7 +108,7 @@ function generateRealisticResults(movieTitle, year = '') {
         
         const versionText = version ? ` ${version}` : '';
         
-        // بناء العنوان بشكل واقعي
+        // بناء العنوان
         const title = `${movieTitle} (${movieYear})${versionText} ${quality.name} ${codec} ${audioTrack} [${source}]`;
         
         const hash = generateHash(title + i + Date.now());
@@ -134,15 +127,10 @@ function generateRealisticResults(movieTitle, year = '') {
     
     // ترتيب حسب الجودة والسيدرز
     return results.sort((a, b) => {
-        // 4K أولاً
         if (a.quality.includes('4K') && !b.quality.includes('4K')) return -1;
         if (!a.quality.includes('4K') && b.quality.includes('4K')) return 1;
-        
-        // 1080p ثانياً
         if (a.quality.includes('1080p') && !b.quality.includes('1080p')) return -1;
         if (!a.quality.includes('1080p') && b.quality.includes('1080p')) return 1;
-        
-        // ثم حسب السيدرز
         return b.seeders - a.seeders;
     });
 }
