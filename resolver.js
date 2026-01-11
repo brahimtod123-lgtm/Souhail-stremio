@@ -1,4 +1,4 @@
-// دالة Real-Debrid
+// دالة Real-Debrid محسنة
 async function getRealDebridStream(magnet, apiKey) {
     try {
         console.log(`🔗 معالجة مع Real-Debrid...`);
@@ -14,7 +14,7 @@ async function getRealDebridStream(magnet, apiKey) {
         });
         
         if (!addRes.ok) {
-            console.log(`❌ RD Add failed: ${addRes.status}`);
+            console.log(`❌ فشل إضافة المغناطيس: ${addRes.status}`);
             return null;
         }
         
@@ -22,7 +22,7 @@ async function getRealDebridStream(magnet, apiKey) {
         const torrentId = addData.id;
         console.log(`📥 Added to RD: ${torrentId}`);
         
-        // 2. اختيار الملفات
+        // 2. اختيار جميع الملفات أولاً
         await fetch(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, {
             method: 'POST',
             headers: {
@@ -33,7 +33,7 @@ async function getRealDebridStream(magnet, apiKey) {
         });
         
         // 3. انتظار المعالجة
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 4000));
         
         // 4. الحصول على المعلومات
         const infoRes = await fetch(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, {
@@ -51,39 +51,99 @@ async function getRealDebridStream(magnet, apiKey) {
         if (infoData.status === 'downloaded' && infoData.links && infoData.links.length > 0) {
             console.log(`✅ Cached on RD! Getting link...`);
             
-            const unrestrictRes = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                body: `link=${encodeURIComponent(infoData.links[0])}`
-            });
-            
-            if (unrestrictRes.ok) {
-                const unrestrictData = await unrestrictRes.json();
-                
-                // تنظيف
-                await deleteFromRD(torrentId, apiKey);
-                
-                return {
-                    streamUrl: unrestrictData.download,
-                    filename: infoData.filename,
-                    size: infoData.bytes,
-                    cached: true
-                };
+            // جرب كل الروابط حتى تجد واحد يعمل
+            for (const link of infoData.links.slice(0, 3)) {
+                try {
+                    const unrestrictRes = await fetch('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${apiKey}`,
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
+                        body: `link=${encodeURIComponent(link)}`,
+                        signal: AbortSignal.timeout(10000)
+                    });
+                    
+                    if (unrestrictRes.ok) {
+                        const unrestrictData = await unrestrictRes.json();
+                        
+                        // تحقق إذا كان الرابط صالحاً
+                        if (unrestrictData.download && isStreamableUrl(unrestrictData.download)) {
+                            console.log(`✅ Streamable link found!`);
+                            
+                            // تنظيف
+                            await deleteFromRD(torrentId, apiKey);
+                            
+                            return {
+                                streamUrl: unrestrictData.download,
+                                filename: infoData.filename,
+                                size: infoData.bytes,
+                                cached: true
+                            };
+                        }
+                    }
+                } catch (linkError) {
+                    console.log(`⚠️ Link failed: ${linkError.message}`);
+                    continue;
+                }
             }
+            
+            console.log(`❌ No streamable links found`);
         }
         
         // 6. تنظيف
         await deleteFromRD(torrentId, apiKey);
-        console.log(`❌ Not cached on RD`);
         return { cached: false };
         
     } catch (error) {
         console.error(`❌ RD Error: ${error.message}`);
         return null;
     }
+}
+
+// تحقق إذا كان الرابط قابلاً للـ streaming
+function isStreamableUrl(url) {
+    if (!url) return false;
+    
+    const urlLower = url.toLowerCase();
+    
+    // الروابط غير القابلة للـ streaming
+    const nonStreamablePatterns = [
+        'no streamable video',
+        'not streamable',
+        'error',
+        'failed',
+        'unsupported',
+        'restricted'
+    ];
+    
+    for (const pattern of nonStreamablePatterns) {
+        if (urlLower.includes(pattern)) {
+            return false;
+        }
+    }
+    
+    // امتدادات الفيديو المدعومة
+    const videoExtensions = [
+        '.mp4', '.mkv', '.avi', '.mov', '.wmv', 
+        '.flv', '.webm', '.m4v', '.mpg', '.mpeg'
+    ];
+    
+    for (const ext of videoExtensions) {
+        if (urlLower.includes(ext)) {
+            return true;
+        }
+    }
+    
+    // إذا كان الرابط يحتوي على كلمات تشير إلى فيديو
+    const videoKeywords = ['video', 'movie', 'film', 'stream', 'play'];
+    for (const keyword of videoKeywords) {
+        if (urlLower.includes(keyword)) {
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 // حذف من RD
@@ -102,8 +162,8 @@ async function deleteFromRD(torrentId, apiKey) {
 async function processTorrents(torrents, apiKey) {
     const streams = [];
     
-    // معالجة أول 12 تورنت
-    const toProcess = torrents.slice(0, 12);
+    // معالجة أول 10 تورنت
+    const toProcess = torrents.slice(0, 10);
     
     console.log(`🔄 Processing ${toProcess.length} torrents...`);
     
@@ -111,7 +171,7 @@ async function processTorrents(torrents, apiKey) {
         const torrent = toProcess[i];
         
         try {
-            console.log(`📦 [${i+1}/${toProcess.length}] ${torrent.quality} - ${torrent.title.substring(0, 50)}...`);
+            console.log(`📦 [${i+1}/${toProcess.length}] ${torrent.quality} - ${torrent.title.substring(0, 40)}...`);
             
             const rdResult = await getRealDebridStream(torrent.magnet, apiKey);
             
@@ -130,7 +190,7 @@ async function processTorrents(torrents, apiKey) {
                     }
                 });
                 
-                console.log(`✅ Cached: ${torrent.quality}`);
+                console.log(`✅ Stream ready!`);
                 
             } else {
                 // Torrent فقط
@@ -139,7 +199,7 @@ async function processTorrents(torrents, apiKey) {
                 
                 streams.push({
                     name: `${qualityIcon} ${torrent.quality}`,
-                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n⚠️ Add to Real-Debrid to stream`,
+                    title: `🎬 ${torrent.title}\n📊 ${torrent.quality} | 💾 ${torrent.size} | 👤 ${torrent.seeders} seeds\n⚠️ Add to Real-Debrid to stream\n🔴 بعض الروابط قد لا تعمل`,
                     infoHash: extractInfoHash(torrent.magnet),
                     fileIdx: 0,
                     behaviorHints: {
@@ -148,12 +208,12 @@ async function processTorrents(torrents, apiKey) {
                     }
                 });
                 
-                console.log(`⚠️ Torrent only`);
+                console.log(`⚠️ Torrent only (may not work)`);
             }
             
             // انتظر بين المعالجات
             if (i < toProcess.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise(resolve => setTimeout(resolve, 800));
             }
             
         } catch (error) {
@@ -175,5 +235,6 @@ module.exports = {
     getRealDebridStream,
     processTorrents,
     deleteFromRD,
-    extractInfoHash
+    extractInfoHash,
+    isStreamableUrl
 };
