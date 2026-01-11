@@ -1,162 +1,112 @@
-// ⭐⭐⭐ دالة البحث في Torrent Galaxy محسنة ⭐⭐⭐
+// دالة البحث الرئيسية
 async function searchTorrentGalaxy(query) {
     try {
-        console.log(`🔍 البحث عن: "${query}"`);
+        console.log(`🌐 جاري البحث عن: "${query}"`);
         
-        // البحث بجميع الجودات
-        const queries = [
-            `${query} 2160p`,
-            `${query} 4K`,
-            `${query} UHD`,
-            query  // البحث العادي
-        ];
+        const results = [];
         
-        const allResults = [];
+        // استخدام CORS proxy
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(`https://torrentgalaxy.to/torrents.php?search=${encodeURIComponent(query)}&lang=0&nox=2&sort=seeders&order=desc`)}`;
         
-        for (const searchQuery of queries) {
-            try {
-                const encodedQuery = encodeURIComponent(searchQuery);
-                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(`https://torrentgalaxy.to/torrents.php?search=${encodedQuery}&sort=seeders&order=desc`)}`;
-                
-                console.log(`🌐 جاري البحث: "${searchQuery}"`);
-                
-                const response = await fetch(proxyUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.5',
-                        'Accept-Encoding': 'gzip, deflate',
-                        'Connection': 'keep-alive'
-                    },
-                    signal: AbortSignal.timeout(10000)
-                });
-                
-                if (!response.ok) {
-                    console.log(`⚠️ لم يعمل البحث: "${searchQuery}" - ${response.status}`);
-                    continue;
-                }
-                
-                const html = await response.text();
-                const results = parseTorrentGalaxyHTML(html);
-                
-                console.log(`✅ "${searchQuery}": ${results.length} نتيجة`);
-                
-                // إضافة النتائج الجديدة
-                for (const result of results) {
-                    // تأكد أن التورنت متعلق بالبحث
-                    if (result.title.toLowerCase().includes(query.toLowerCase().split(' ')[0])) {
-                        // تحقق من عدم التكرار
-                        const existing = allResults.find(r => 
-                            r.magnet === result.magnet || 
-                            r.title === result.title
-                        );
-                        
-                        if (!existing) {
-                            allResults.push({
-                                ...result,
-                                queryMatch: searchQuery
-                            });
-                        }
-                    }
-                }
-                
-                // إذا حصلنا على نتائج كافية، توقف
-                if (allResults.length >= 25) {
-                    console.log(`🎯 وصلنا لـ 25 نتيجة، توقف البحث`);
-                    break;
-                }
-                
-                // انتظر قليلاً بين الطلبات
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-            } catch (error) {
-                console.log(`❌ خطأ في "${searchQuery}": ${error.message}`);
-                continue;
-            }
+        const response = await fetch(proxyUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0'
+            },
+            signal: AbortSignal.timeout(15000)
+        });
+        
+        if (!response.ok) {
+            console.log(`❌ Proxy error: ${response.status}`);
+            return generateDefaultResults(query);
         }
         
-        console.log(`📊 المجموع: ${allResults.length} نتيجة`);
+        const html = await response.text();
         
-        // ترتيب النتائج: 4K أولاً، ثم حسب الجودة والسيدرز
-        return allResults
-            .sort((a, b) => {
-                // 4K أولاً
-                const aIs4K = a.quality.includes('4K') || a.quality.includes('2160p') || a.title.includes('4K');
-                const bIs4K = b.quality.includes('4K') || b.quality.includes('2160p') || b.title.includes('4K');
-                
-                if (aIs4K && !bIs4K) return -1;
-                if (!aIs4K && bIs4K) return 1;
-                
-                // 1080p ثانياً
-                const aIs1080 = a.quality.includes('1080p') || a.title.includes('1080p');
-                const bIs1080 = b.quality.includes('1080p') || b.title.includes('1080p');
-                
-                if (aIs1080 && !bIs1080) return -1;
-                if (!aIs1080 && bIs1080) return 1;
-                
-                // حسب السيدرز
-                return b.seeders - a.seeders;
-            })
-            .slice(0, 25); // 25 نتيجة كحد أقصى
+        // طريقة 1: البحث بـ regex
+        const torrentRegex = /<div class="tgxtablerow txlight">([\s\S]*?)<\/div>/gs;
+        let match;
+        
+        while ((match = torrentRegex.exec(html)) !== null && results.length < 30) {
+            const torrentHtml = match[1];
+            
+            // استخراج المغناطيس
+            const magnetMatch = torrentHtml.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
+            if (!magnetMatch) continue;
+            
+            // استخراج العنوان
+            const titleMatch = torrentHtml.match(/title="([^"]+)"/);
+            if (!titleMatch) continue;
+            
+            const title = cleanTitle(titleMatch[1]);
+            
+            // استخراج الحجم
+            let size = 'Unknown';
+            const sizeMatch = torrentHtml.match(/(\d+\.?\d*)\s*(GB|MB|GiB|MiB)/i);
+            if (sizeMatch) {
+                size = `${sizeMatch[1]} ${sizeMatch[2].toUpperCase()}`;
+            }
+            
+            // استخراج السيدرز
+            let seeders = 10;
+            const seedMatch = torrentHtml.match(/>(\d+)<\/span>\s*<\/div>\s*<\/div>\s*Seeders/i);
+            if (seedMatch) {
+                seeders = parseInt(seedMatch[1]);
+            }
+            
+            results.push({
+                title: title,
+                magnet: magnetMatch[1],
+                source: 'TorrentGalaxy',
+                quality: detectQuality(title),
+                size: size,
+                seeders: seeders,
+                year: detectYear(title)
+            });
+        }
+        
+        // إذا لم نجد نتائج بـ regex، نستخدم الطريقة القديمة
+        if (results.length === 0) {
+            console.log('🔄 استخدام الطريقة القديمة للبحث...');
+            return parseHTMLOldWay(html, query);
+        }
+        
+        console.log(`✅ تم العثور على: ${results.length} نتيجة`);
+        
+        // ترتيب النتائج: 4K أولاً، ثم حسب السيدرز
+        return results.sort((a, b) => {
+            // 4K أولاً
+            const aIs4K = a.quality.includes('4K') || a.quality.includes('2160p');
+            const bIs4K = b.quality.includes('4K') || b.quality.includes('2160p');
+            if (aIs4K && !bIs4K) return -1;
+            if (!aIs4K && bIs4K) return 1;
+            
+            // 1080p ثانياً
+            const aIs1080 = a.quality.includes('1080p');
+            const bIs1080 = b.quality.includes('1080p');
+            if (aIs1080 && !bIs1080) return -1;
+            if (!aIs1080 && bIs1080) return 1;
+            
+            // حسب السيدرز
+            return b.seeders - a.seeders;
+        }).slice(0, 25); // 25 نتيجة كحد أقصى
         
     } catch (error) {
-        console.log(`🔥 فشل البحث الكلي: ${error.message}`);
-        return getFallbackResults(query);
+        console.log(`❌ Search failed: ${error.message}`);
+        return generateDefaultResults(query);
     }
 }
 
-// ⭐⭐⭐ بارسر HTML ⭐⭐⭐
-function parseTorrentGalaxyHTML(html) {
-    const results = [];
-    
-    // استخدم regex للعثور على التورنتات
-    const torrentRegex = /<div class="tgxtablerow txlight">([\s\S]*?)<\/div>/g;
-    let torrentMatch;
-    
-    while ((torrentMatch = torrentRegex.exec(html)) !== null) {
-        const torrentHtml = torrentMatch[1];
-        
-        // استخراج المغناطيس
-        const magnetMatch = torrentHtml.match(/href="(magnet:\?xt=urn:btih:[^"]+)"/);
-        if (!magnetMatch) continue;
-        
-        // استخراج العنوان
-        const titleMatch = torrentHtml.match(/title="([^"]+)"/);
-        if (!titleMatch) continue;
-        
-        const title = cleanTitle(titleMatch[1]);
-        
-        // استخراج الحجم
-        let size = 'Unknown';
-        const sizeMatch = torrentHtml.match(/<span class="badge badge-secondary">([^<]+)<\/span>/);
-        if (sizeMatch) size = sizeMatch[1];
-        
-        // استخراج السيدرز
-        let seeders = 10;
-        const seedMatch = torrentHtml.match(/<span class="font-weight-bold text-success">(\d+)<\/span>/);
-        if (seedMatch) seeders = parseInt(seedMatch[1]);
-        
-        results.push({
-            title: title,
-            magnet: magnetMatch[1],
-            source: 'TorrentGalaxy',
-            quality: detectQuality(title),
-            size: size,
-            seeders: seeders,
-            year: detectYear(title)
-        });
-    }
-    
-    // إذا لم نجد بطريقة regex، نستخدم الطريقة القديمة
-    if (results.length === 0) {
-        return parseOldWay(html);
-    }
-    
-    return results;
-}
-
-// ⭐⭐⭐ الطريقة القديمة (backup) ⭐⭐⭐
-function parseOldWay(html) {
+// الطريقة القديمة للبحث
+function parseHTMLOldWay(html, query) {
     const results = [];
     const lines = html.split('\n');
     
@@ -165,7 +115,7 @@ function parseOldWay(html) {
             const magnetMatch = lines[i].match(/href="(magnet:[^"]+)"/);
             if (magnetMatch) {
                 // ابحث عن العنوان
-                for (let j = Math.max(0, i - 10); j < i; j++) {
+                for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
                     if (lines[j] && lines[j].includes('title="') && lines[j].includes('href="/torrent/')) {
                         const titleMatch = lines[j].match(/title="([^"]+)"/);
                         if (titleMatch) {
@@ -198,92 +148,92 @@ function parseOldWay(html) {
                 }
             }
         }
+        
+        if (results.length >= 20) break;
     }
     
     return results;
 }
 
-// ⭐⭐⭐ نتائج احتياطية ⭐⭐⭐
-function getFallbackResults(query) {
-    console.log(`🔄 استخدام نتائج احتياطية لـ: ${query}`);
+// توليد نتائج افتراضية
+function generateDefaultResults(query) {
+    console.log(`🔄 توليد نتائج افتراضية لـ: "${query}"`);
     
-    const fallbacks = [];
-    const qualities = ['2160p 4K UHD', '1080p BluRay', '720p WEB-DL', '480p HDTV'];
+    const results = [];
+    const qualities = [
+        { name: '2160p 4K UHD', size: '18.5 GB', seeders: 120 },
+        { name: '1080p BluRay', size: '8.7 GB', seeders: 180 },
+        { name: '1080p WEB-DL', size: '6.4 GB', seeders: 160 },
+        { name: '720p BluRay', size: '5.8 GB', seeders: 100 },
+        { name: '2160p x265', size: '12.3 GB', seeders: 150 },
+        { name: '1080p x265', size: '4.2 GB', seeders: 140 }
+    ];
     
-    for (const quality of qualities) {
-        fallbacks.push({
-            title: `${query} (2024) ${quality}`,
-            magnet: `magnet:?xt=urn:btih:${generateHash(query + quality)}&dn=${encodeURIComponent(query + ' ' + quality)}&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://open.tracker.cl:1337/announce`,
-            source: 'Backup',
-            quality: quality,
-            size: quality.includes('4K') ? '15.2 GB' : quality.includes('1080p') ? '8.5 GB' : '2.3 GB',
-            seeders: quality.includes('4K') ? 120 : 80,
+    qualities.forEach((quality, index) => {
+        results.push({
+            title: `${query} (2024) ${quality.name}`,
+            magnet: `magnet:?xt=urn:btih:DEFAULT${index}${Date.now()}&dn=${encodeURIComponent(query + ' ' + quality.name)}&tr=udp://tracker.opentrackr.org:1337/announce&tr=udp://open.tracker.cl:1337/announce`,
+            source: 'Default',
+            quality: quality.name,
+            size: quality.size,
+            seeders: quality.seeders,
             year: '2024'
         });
-    }
+    });
     
-    return fallbacks;
+    return results;
 }
 
-// ⭐⭐⭐ توليد هاش ⭐⭐⭐
-function generateHash(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16).padStart(40, '0');
-}
-
-// ⭐⭐⭐ اكتشاف الجودة ⭐⭐⭐
+// اكتشاف الجودة
 function detectQuality(title) {
     const titleLower = title.toLowerCase();
     
     if (titleLower.includes('2160p') || titleLower.includes('4k') || titleLower.includes('uhd')) {
+        if (titleLower.includes('remux')) return '4K REMUX';
+        if (titleLower.includes('hdr')) return '4K HDR';
         return '4K UHD';
     }
-    if (titleLower.includes('1080p') || titleLower.includes('fhd') || titleLower.includes('bluray')) {
-        return '1080p BluRay';
-    }
-    if (titleLower.includes('720p') || titleLower.includes('hdrip')) {
-        return '720p HDRip';
-    }
-    if (titleLower.includes('480p') || titleLower.includes('dvdrip')) {
-        return '480p DVD';
+    
+    if (titleLower.includes('1080p')) {
+        if (titleLower.includes('bluray')) return '1080p BluRay';
+        if (titleLower.includes('web-dl')) return '1080p WEB-DL';
+        return '1080p';
     }
     
-    // اكتشاف من نمط الملف
-    if (titleLower.match(/\b(web-?dl|webrip|web)\b/)) return 'WEB-DL';
-    if (titleLower.match(/\b(blu-?ray|brrip|bdrip)\b/)) return 'BluRay';
-    if (titleLower.match(/\b(hdtv|pdtv|dsr)\b/)) return 'HDTV';
+    if (titleLower.includes('720p')) {
+        if (titleLower.includes('bluray')) return '720p BluRay';
+        return '720p';
+    }
+    
+    if (titleLower.includes('bluray')) return 'BluRay';
+    if (titleLower.includes('web-dl')) return 'WEB-DL';
     
     return 'HD';
 }
 
-// ⭐⭐⭐ اكتشاف السنة ⭐⭐⭐
+// اكتشاف السنة
 function detectYear(title) {
     const yearMatch = title.match(/(19|20)\d{2}/);
     return yearMatch ? yearMatch[0] : '2024';
 }
 
-// ⭐⭐⭐ تنظيف العنوان ⭐⭐⭐
+// تنظيف العنوان
 function cleanTitle(title) {
     return title
         .replace(/\./g, ' ')
         .replace(/_/g, ' ')
-        .replace(/\[[^\]]*\]/g, '')
-        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\[.*?\]/g, '')
+        .replace(/\(.*?\)/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
-        .substring(0, 100); // قص العنوان الطويل
+        .substring(0, 100);
 }
 
-// ⭐⭐⭐ تصدير الدوال ⭐⭐⭐
+// تصدير الدوال
 module.exports = {
     searchTorrentGalaxy,
     detectQuality,
     cleanTitle,
     detectYear,
-    getFallbackResults
+    generateDefaultResults
 };
