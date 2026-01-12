@@ -1,3 +1,2 @@
 PORT=3000
 REAL_DEBRID_API=your_api_key_here
-NODE_ENV=development
