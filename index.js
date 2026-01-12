@@ -13,7 +13,7 @@ const REAL_DEBRID_TOKEN = process.env.REAL_DEBRID_API;
 // Routes
 app.get('/', (req, res) => {
     res.send(`
-        <h1>Souhail Torrent Streamer</h1>
+        <h1>Souhail Stremio Streamer</h1>
         <p>الروابط المتاحة:</p>
         <ul>
             <li><a href="/search/avengers">/search/avengers</a> - بحث</li>
@@ -59,7 +59,7 @@ app.get('/health', (req, res) => {
 app.listen(port, () => {
     console.log(`
     ==================================
-      Souhail Torrent Streamer
+      Souhail Stremio Streamer
       Running on: http://localhost:${port}
     ==================================
     `);
