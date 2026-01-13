@@ -43,12 +43,11 @@ app.get("/stream/:type/:id.json", async (req, res) => {
         ...s,
 
         // 🟢 الاسم اللي فيه البول الخضرا
-        name: "🟢 SOUHAIL / RD",
+        name: "💥🟢 SOUHAIL / RD 🟢💥",
 
         // 📋 الترتيب التقني (بلا Seeders)
         title: `
 ♻️🎬 ${cleanTitle(title)}
-
 ♻️📽️ ${extract(title, /(2160p|1080p|720p)/i) || "1080p"}
 ♻️🎞️ ${extract(title, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
 ♻️🔊 ${extract(title, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
