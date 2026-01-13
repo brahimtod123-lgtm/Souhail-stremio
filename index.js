@@ -26,40 +26,44 @@ app.get("/manifest.json", (req, res) => {
    STREAM
 ========================= */
 app.get("/stream/:type/:id.json", async (req, res) => {
-  if (!RD_KEY) {
-    return res.json({ streams: [] });
-  }
+  if (!RD_KEY) return res.json({ streams: [] });
 
   try {
-    const torrentioUrl = `https://torrentio.strem.fun/realdebrid=${RD_KEY}/stream/${req.params.type}/${req.params.id}.json`;
+    const torrentioUrl =
+      `https://torrentio.strem.fun/realdebrid=${RD_KEY}/stream/${req.params.type}/${req.params.id}.json`;
 
     const response = await fetch(torrentioUrl);
     const data = await response.json();
 
-    const streams = (data.streams || []).map((s) => {
-      const title = s.title || "";
+    let streams = (data.streams || [])
+      // ❌ نحيد CAM / TS
+      .filter(s => !/(CAM|TS|TELE|SCR|HDCAM)/i.test(s.title || ""))
+      // ✅ نخلي غير الجودات المزيانة
+      .filter(s => /(2160p|1080p|720p)/i.test(s.title || ""))
+      // 🔽 ترتيب حسب الحجم (من الكبير للصغير)
+      .sort((a, b) => extractSize(b.title) - extractSize(a.title))
+      // 🧱 الفورما النهائي
+      .map(s => {
+        const title = s.title || "";
 
-      return {
-        ...s,
-
-        // 🟢 الاسم اللي فيه البول الخضرا
-        name: "💥🟢 SOUHAIL / RD 🟢💥",
-
-        // 📋 الترتيب التقني (بلا Seeders)
-        title: `
+        return {
+          ...s,
+          name: "💥🟢 SOUHAIL / RD 🟢💥",
+          title: `
 ♻️🎬 ${cleanTitle(title)}
-♻️📽️ ${extract(title, /(2160p|1080p|720p)/i) || "1080p"}
+♻️📽️ ${extract(title, /(2160p|1080p|720p)/i)}
 ♻️🎞️ ${extract(title, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
 ♻️🔊 ${extract(title, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
-♻️💾 ${extract(title, /\d+(\.\d+)?\s?(GB|MB)/i) || "Size"}
+♻️💾 ${formatSize(extractSize(title))}
 ♻️🌍 EN / AR
 ♻️⚡ RD Cached
 ♻️🧲 ${extract(title, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}
-        `.trim()
-      };
-    });
+          `.trim()
+        };
+      });
 
     res.json({ streams });
+
   } catch (err) {
     console.error("Stream error:", err.message);
     res.json({ streams: [] });
@@ -71,7 +75,6 @@ app.get("/stream/:type/:id.json", async (req, res) => {
 ========================= */
 app.get("/install", (req, res) => {
   const baseUrl = `https://${req.hostname}`;
-
   res.send(`
     <h2>Install Souhail Premium</h2>
     <a href="stremio://stremio.xyz/app/${req.hostname}/manifest.json">
@@ -81,9 +84,7 @@ app.get("/install", (req, res) => {
   `);
 });
 
-app.get("/", (req, res) => {
-  res.redirect("/install");
-});
+app.get("/", (req, res) => res.redirect("/install"));
 
 /* =========================
    HELPERS
@@ -97,8 +98,26 @@ function cleanTitle(text) {
   return text.split("\n")[0].replace(/\./g, " ").trim();
 }
 
+// استخراج الحجم بالـ bytes
+function extractSize(text) {
+  const match = text.match(/(\d+(\.\d+)?)\s?(GB|MB)/i);
+  if (!match) return 0;
+
+  const size = parseFloat(match[1]);
+  const unit = match[3].toUpperCase();
+
+  return unit === "GB" ? size * 1024 : size;
+}
+
+function formatSize(sizeMB) {
+  if (!sizeMB) return "Size";
+  return sizeMB >= 1024
+    ? (sizeMB / 1024).toFixed(2) + " GB"
+    : sizeMB.toFixed(0) + " MB";
+}
+
 /* =========================
-   START SERVER
+   START
 ========================= */
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
