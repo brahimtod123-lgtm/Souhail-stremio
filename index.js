@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 8080;
 const RD_KEY = process.env.REAL_DEBRID_API;
 
 console.log(`Starting with PORT: ${PORT}, RD_KEY: ${RD_KEY ? "yes" : "no"}`);
+
 /* =========================
 MANIFEST
 ========================= */
