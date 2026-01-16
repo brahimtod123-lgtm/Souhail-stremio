@@ -15,8 +15,8 @@ app.get("/manifest.json", (req, res) => {
   res.json({
     id: "com.souhail.stremio",
     version: "1.0.0",
-    name: "💎Souhail Premium💎",
-    description: "Real-Debrid Streams (Clean & Technical)",
+    name: "🟢 Souhail Premium 🟢",
+    description: "Clean Real-Debrid Streams (Safe Formatting)",
     resources: ["stream"],
     types: ["movie", "series"]
   });
@@ -35,28 +35,26 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     const response = await fetch(torrentioUrl);
     const data = await response.json();
 
-    let streams = (data.streams || [])
+    const streams = (data.streams || [])
       // ❌ نحيد CAM / TS
       .filter(s => !/(CAM|TS|TELE|SCR|HDCAM)/i.test(s.title || ""))
       // ✅ نخلي غير الجودات المزيانة
       .filter(s => /(2160p|1080p|720p)/i.test(s.title || ""))
-      // 🔽 ترتيب حسب الحجم (من الكبير للصغير)
+      // 🔽 ترتيب حسب الحجم
       .sort((a, b) => extractSize(b.title) - extractSize(a.title))
-      // 🧱 الفورما النهائي
+      // 🎨 غير نزين title
       .map(s => {
-        const title = s.title || "";
+        const t = s.title || "";
 
         return {
-          ...s,
-          name: "🛟🟢SOUHAIL/RD🟢🛟",
-          title: `
-1️⃣♻️🎬 ${extractCleanMovieTitle(title)}
-2️⃣♻️💾 ${formatSize(extractSize(title))}
-3️⃣♻️🎥 (${extractVideoRange(title)})           ♻️🎞️ ${extract(title, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
-4️⃣♻️📽️ ${extract(title, /(2160p|1080p|720p)/i)}.                
-5️⃣♻️🔊 ${extract(title, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}            ♻️ 🌍 EN / AR
-      ♻️🧲 ${extract(title, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}
-          `.trim()
+          ...s, // ⛔ مهم: ما نمسّوش stream الأصلي
+          title:
+`🎬 ${cleanTitle(t)}
+💾 ${formatSize(extractSize(t))} | ${extractVideoRange(t)}
+📽️ ${extract(t, /(2160p|1080p|720p)/i)}
+🎞️ ${extract(t, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
+🔊 ${extract(t, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
+🧲 ${extract(t, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}`
         };
       });
 
@@ -88,8 +86,8 @@ app.get("/", (req, res) => res.redirect("/install"));
    HELPERS
 ========================= */
 function extract(text, regex) {
-  const match = text.match(regex);
-  return match ? match[0] : null;
+  const m = text.match(regex);
+  return m ? m[0] : null;
 }
 
 function extractVideoRange(text) {
@@ -98,26 +96,23 @@ function extractVideoRange(text) {
   return "SDR";
 }
 
-function extractCleanMovieTitle(text) {
+function cleanTitle(text) {
   return text
     .split(/\b(2160p|1080p|720p|WEB|BluRay|HDR|DV|x264|x265)\b/i)[0]
     .replace(/\./g, " ")
     .trim();
 }
 
-// استخراج الحجم
 function extractSize(text) {
-  const match = text.match(/(\d+(\.\d+)?)\s?(GB|MB)/i);
-  if (!match) return 0;
+  const m = text.match(/(\d+(\.\d+)?)\s?(GB|MB)/i);
+  if (!m) return 0;
 
-  const size = parseFloat(match[1]);
-  const unit = match[3].toUpperCase();
-
-  return unit === "GB" ? size * 1024 : size;
+  const size = parseFloat(m[1]);
+  return m[3].toUpperCase() === "GB" ? size * 1024 : size;
 }
 
 function formatSize(sizeMB) {
-  if (!sizeMB) return "Size";
+  if (!sizeMB) return "";
   return sizeMB >= 1024
     ? (sizeMB / 1024).toFixed(2) + " GB"
     : sizeMB.toFixed(0) + " MB";
