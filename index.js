@@ -13,12 +13,14 @@ console.log(`Starting with PORT: ${PORT}, RD_KEY: ${RD_KEY ? "yes" : "no"}`);
 ========================= */
 app.get("/manifest.json", (req, res) => {
   res.json({
-    id: "com.souhail.stremio.v2",
-    version: "2.0.0",
-    name: "🟢Souhail Premium🟢",
-    description: "Clean Real-Debrid Streams (Safe Formatting)",
+    id: "org.souhail.premium.v4",
+    version: "4.0.0",
+    name: "Souhail Premium",
+    description: "Torrentio + Comet + MediaFusion + WebStreamr",
     resources: ["stream"],
-    types: ["movie", "series"]
+    types: ["movie", "series"],
+    idPrefixes: ["tt"],
+    catalogs: []
   });
 });
 
@@ -32,31 +34,31 @@ app.get("/stream/:type/:id.json", async (req, res) => {
     const torrentioUrl =
       `https://torrentio.strem.fun/realdebrid=${RD_KEY}/stream/${req.params.type}/${req.params.id}.json`;
 
-    const response = await fetch(torrentioUrl);
-    const data = await response.json();
+    const cometUrl =
+      `https://comet.stremio.ru/stream/${req.params.type}/${req.params.id}.json`;
 
-    const streams = (data.streams || [])
-      // ❌ نحيد CAM / TS
-      .filter(s => !/(CAM|TS|TELE|SCR|HDCAM)/i.test(s.title || ""))
-      // ✅ نخلي غير الجودات المزيانة
-      .filter(s => /(2160p|1080p|720p)/i.test(s.title || ""))
-      // 🔽 ترتيب حسب الحجم
-      .sort((a, b) => extractSize(b.title) - extractSize(a.title))
-      // 🎨 غير نزين title
-      .map(s => {
-        const t = s.title || "";
+    const mediaFusionUrl =
+      `https://mediafusion.stremio.ru/stream/${req.params.type}/${req.params.id}.json`;
 
-        return {
-          ...s, // ⛔ مهم: ما نمسّوش stream الأصلي
-          title:
-`🎬 ${cleanTitle(t)}
-💾 ${formatSize(extractSize(t))} | ${extractVideoRange(t)}
-📽️ ${extract(t, /(2160p|1080p|720p)/i)}
-🎞️ ${extract(t, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
-🔊 ${extract(t, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
-🧲 ${extract(t, /(YTS|RARBG|TPB|ThePirateBay|1337x)/i) || "Torrent"}`
-        };
-      });
+    const webStreamrUrl =
+      `https://webstreamr.app/stream/${req.params.type}/${req.params.id}.json`;
+
+    const [torrentioData, cometStreams, mediaFusionStreams, webStreamrStreams] =
+      await Promise.all([
+        fetchSource(torrentioUrl),
+        fetchSource(cometUrl),
+        fetchSource(mediaFusionUrl),
+        fetchSource(webStreamrUrl)
+      ]);
+
+    const allStreams = [
+      ...(torrentioData || []),
+      ...(cometStreams || []),
+      ...(mediaFusionStreams || []),
+      ...(webStreamrStreams || [])
+    ];
+
+    const streams = processStreams(allStreams);
 
     res.json({ streams });
 
@@ -67,20 +69,52 @@ app.get("/stream/:type/:id.json", async (req, res) => {
 });
 
 /* =========================
-   INSTALL
+   FETCH SOURCE (SAFE)
 ========================= */
-app.get("/install", (req, res) => {
-  const baseUrl = `https://${req.hostname}`;
-  res.send(`
-    <h2>Install Souhail Premium</h2>
-    <a href="stremio://stremio.xyz/app/${req.hostname}/manifest.json">
-      Install Addon
-    </a>
-    <p>${baseUrl}/manifest.json</p>
-  `);
-});
+async function fetchSource(url) {
+  try {
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Stremio",
+        "Accept": "application/json"
+      }
+    });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return j.streams || [];
+  } catch (e) {
+    return [];
+  }
+}
 
-app.get("/", (req, res) => res.redirect("/install"));
+/* =========================
+   PROCESS STREAMS
+========================= */
+function processStreams(streams) {
+  return streams
+    .filter(s => {
+      const t = s.title || s.name || "";
+      return !/(CAM|TS|TELE|SCR|HDCAM)/i.test(t);
+    })
+    .filter(s => /(2160p|1080p|720p)/i.test(s.title || ""))
+    .sort((a, b) => extractSize(b.title) - extractSize(a.title))
+    .map(s => {
+      const t = s.title || "";
+
+      return {
+        ...s,
+        name: "🟢 SOUHAIL / RD",
+        title: `
+🎬 ${extractCleanMovieTitle(t)}
+💾 ${formatSize(extractSize(t))} | ${extractVideoRange(t)}
+📽️ ${extract(t, /(2160p|1080p|720p)/i)}
+🎞️ ${extract(t, /(H\.265|H\.264|x265|x264)/i) || "H.264"}
+🔊 ${extract(t, /(Atmos|DDP5\.1|DD5\.1|AC3|AAC)/i) || "Audio"}
+🧲 ${extract(t, /(YTS|RARBG|TPB|ThePirateBay|1337x|Comet|WebStreamr|MediaFusion)/i) || "Source"}
+        `.trim()
+      };
+    });
+}
 
 /* =========================
    HELPERS
@@ -96,7 +130,7 @@ function extractVideoRange(text) {
   return "SDR";
 }
 
-function cleanTitle(text) {
+function extractCleanMovieTitle(text) {
   return text
     .split(/\b(2160p|1080p|720p|WEB|BluRay|HDR|DV|x264|x265)\b/i)[0]
     .replace(/\./g, " ")
@@ -106,7 +140,6 @@ function cleanTitle(text) {
 function extractSize(text) {
   const m = text.match(/(\d+(\.\d+)?)\s?(GB|MB)/i);
   if (!m) return 0;
-
   const size = parseFloat(m[1]);
   return m[3].toUpperCase() === "GB" ? size * 1024 : size;
 }
@@ -117,6 +150,22 @@ function formatSize(sizeMB) {
     ? (sizeMB / 1024).toFixed(2) + " GB"
     : sizeMB.toFixed(0) + " MB";
 }
+
+/* =========================
+   INSTALL
+========================= */
+app.get("/install", (req, res) => {
+  const host = req.hostname;
+  res.send(`
+    <h2>Install Souhail Premium</h2>
+    <a href="stremio://stremio.xyz/app/${host}/manifest.json">
+      Install Addon
+    </a>
+    <p>https://${host}/manifest.json</p>
+  `);
+});
+
+app.get("/", (req, res) => res.redirect("/install"));
 
 /* =========================
    START
